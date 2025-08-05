@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Geo Reflector</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  <script src="https://unpkg.com/geodesy@2/latlon-ellipsoidal.js"></script>
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100vh; overflow: hidden;
+      font-family: system-ui, sans-serif;
+    }
+    #container {
+      display: flex; height: 100vh; width: 100vw;
+    }
+    #left {
+      width: 50%; box-sizing: border-box; padding: 1rem;
+      overflow: hidden; display: flex; flex-direction: column;
+      background-color: var(--bg);
+      color: var(--text);
+    }
+    #right { width: 50%; height: 100%; }
+
+    label { font-weight: 600; margin-top: 0.5rem; display: block; }
+    input, select, button {
+      width: 100%; margin-top: 0.25rem; padding: 0.5rem;
+      border-radius: 5px; border: 1px solid var(--border);
+      background-color: var(--input-bg); color: var(--text);
+      box-sizing: border-box;
+    }
+
+    button {
+      cursor: pointer; font-weight: bold;
+      background-color: var(--button-bg); color: var(--button-text);
+      border: none;
+    }
+
+    #output-container {
+      flex-grow: 1; overflow-y: auto; margin-top: 1rem;
+    }
+
+    table {
+      width: 100%; border-collapse: collapse; font-size: 0.9rem;
+    }
+    th, td {
+      padding: 0.5rem; border: 1px solid var(--border);
+    }
+    th {
+      background-color: var(--button-bg); color: var(--button-text);
+    }
+
+    #map { width: 100%; height: 100%; z-index: 0; }
+
+    :root.light {
+      --bg: #fefefe;
+      --text: #111;
+      --input-bg: #fff;
+      --button-bg: #007bff;
+      --button-text: #fff;
+      --output-bg: #f4f4f4;
+      --border: #ccc;
+    }
+
+    :root.dark {
+      --bg: #1e1e1e;
+      --text: #eee;
+      --input-bg: #2c2c2c;
+      --button-bg: #3399ff;
+      --button-text: #fff;
+      --output-bg: #2b2b2b;
+      --border: #444;
+    }
+
+    .form-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    .form-row label {
+      flex-shrink: 0;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 48px;
+      height: 24px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #ccc;
+      border-radius: 24px;
+      transition: .2s;
+    }
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 18px; width: 18px;
+      left: 3px; bottom: 3px;
+      background-color: white;
+      border-radius: 50%;
+      transition: .2s;
+    }
+    input:checked + .slider {
+      background-color: #007bff;
+    }
+    input:checked + .slider:before {
+      transform: translateX(24px);
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="left">
+      <div class="form-row">
+        <label for="darkToggle">Dark Mode</label>
+        <label class="switch">
+          <input type="checkbox" id="darkToggle">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <label for="csvFile">Upload CSV</label>
+      <input type="file" id="csvFile" accept=".csv" />
+
+      <label for="target">Target Coordinates (lat,lon)</label>
+      <input id="target" placeholder="e.g., 50.0,8.0" />
+
+      <label for="current">Current Coordinates (lat,lon)</label>
+      <input id="current" placeholder="e.g., 49.0,8.0" />
+
+      <label for="count">Number of Closest Points</label>
+      <input id="count" type="number" value="20" min="1" />
+
+      <div class="form-row">
+        <label for="showRest">Extra Points</label>
+        <label class="switch">
+          <input type="checkbox" id="showRest" />
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <label for="factor">Factor (max 20)</label>
+      <input id="factor" type="number" value="5" min="1" max="20" />
+
+      <div class="form-row">
+        <label for="showLines">Show Lines</label>
+        <label class="switch">
+            <input type="checkbox" id="showLines" checked />
+            <span class="slider"></span>
+        </label>
+      </div>
+
+      <label for="datum">Reflection Method</label>
+      <select id="datum">
+        <option value="great-circle">Great Circle (Spherical)</option>
+        <option value="wgs84">WGS84 (Ellipsoidal)</option>
+      </select>
+
+      <button onclick="loadAndProcess()">Reflect & Show</button>
+
+      <div id="output-container">
+        <table id="output-table">
+          <thead>
+            <tr>
+              <th>Original Coords</th>
+              <th>Reflected Coords</th>
+              <th>Extra Fields</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="right"><div id="map"></div></div>
+  </div>
+  <script>
+    const darkToggle = document.getElementById('darkToggle');
+    const root = document.documentElement;
+    darkToggle.addEventListener('change', () => {
+      root.className = darkToggle.checked ? 'dark' : 'light';
+    });
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      darkToggle.checked = true;
+      root.className = 'dark';
+    } else {
+      root.className = 'light';
+    }
+
+    let map = L.map('map').setView([50, 8], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    let markers = [], lines = [];
+
+    function clearMap() {
+      markers.forEach(m => map.removeLayer(m));
+      lines.forEach(l => map.removeLayer(l));
+      markers = []; lines = [];
+    }
+
+    function loadAndProcess() {
+      const file = document.getElementById('csvFile').files[0];
+      if (!file) return alert("Please upload a CSV");
+
+      const reader = new FileReader();
+      reader.onload = e => processCSV(e.target.result);
+      reader.readAsText(file);
+    }
+
+    function angularDistanceDegrees(lat1, lon1, lat2, lon2) {
+      const φ1 = toRad(lat1), φ2 = toRad(lat2);
+      const Δλ = toRad(lon2 - lon1);
+
+      const cosθ = Math.sin(φ1) * Math.sin(φ2) +
+                  Math.cos(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+
+      const θ = Math.acos(Math.min(1, Math.max(-1, cosθ))); // clamp to [–1,1]
+      return θ * (180 / Math.PI); // convert to degrees
+    }
+
+    function toRad(deg) {
+      return deg * Math.PI / 180;
+    }
+
+    function processCSV(text) {
+      clearMap();
+      const rows = text.trim().split('\n')
+        .filter((l, i) => i === 0 ? !isNaN(parseFloat(l.split(',')[0])) : true)
+        .map(l => l.split(','));
+      const points = rows.map(r => ({
+        lat: parseFloat(r[0]), lon: parseFloat(r[1]), extra: r.slice(2)
+      }));
+
+      const target = document.getElementById('target').value.split(',').map(Number);
+      const current = document.getElementById('current').value.split(',').map(Number);
+      const count = parseInt(document.getElementById('count').value);
+      const includeRest = document.getElementById('showRest').checked;
+      let factor = parseInt(document.getElementById('factor').value);
+      if (isNaN(factor) || factor < 1) factor = 1;
+      if (factor > 20) factor = 20;
+      const mode = document.getElementById('datum').value;
+
+      function reflect(p) {
+        if (mode === 'great-circle') {
+          const dist = turf.distance([target[1], target[0]], [p.lon, p.lat]);
+          const bearing = turf.bearing([target[1], target[0]], [p.lon, p.lat]);
+          const refl = turf.destination([target[1], target[0]], dist, (bearing + 180) % 360);
+          return [refl.geometry.coordinates[1], refl.geometry.coordinates[0]];
+        } else {
+          const tgt = new LatLonEllipsoidal(target[0], target[1]);
+          const orig = new LatLonEllipsoidal(p.lat, p.lon);
+          const dist = tgt.distanceTo(orig);
+          const bearing = tgt.initialBearingTo(orig);
+          const refl = tgt.destinationPoint(dist, (bearing + 180) % 360);
+          return [refl.lat, refl.lon];
+        }
+      }
+
+      const validPoints = points.filter(p => {
+        const angle = angularDistanceDegrees(p.lat, p.lon, target[0], target[1]);
+        return angle <= 90;
+      });
+
+      const reflected = validPoints.map(p => {
+        const [lat, lon] = reflect(p);
+        return { ...p, reflLat: lat, reflLon: lon };
+      });
+
+      const sorted = reflected.map(p => {
+        const dist = turf.distance([p.reflLon, p.reflLat], [current[1], current[0]]);
+        return { ...p, dist };
+      }).sort((a, b) => a.dist - b.dist);
+
+      const closest = sorted.slice(0, count);
+      const rest = includeRest ? sorted.slice(count, count * factor) : [];
+
+      const tbody = document.querySelector('#output-table tbody');
+      tbody.innerHTML = '';
+
+      [...closest, ...rest].forEach(p => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</td>
+          <td>${p.reflLat.toFixed(5)}, ${p.reflLon.toFixed(5)}</td>
+          <td>${p.extra.join(', ')}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      const addCircle = (lat, lon, color, label, opacity = 1) => {
+        const m = L.circleMarker([lat, lon], {
+          radius: 5,
+          fillColor: color,
+          fillOpacity: opacity,
+          stroke: false
+        }).addTo(map);
+        m.bindTooltip(label, { permanent: false, direction: 'top' });
+        m.on('click', () => {
+          const coordText = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+          navigator.clipboard.writeText(coordText)
+            .then(() => console.log(`Copied: ${coordText}`))
+            .catch(err => console.error('Copy failed', err));
+        });
+        markers.push(m);
+      };
+
+        const drawLine = (a, b, color, opacity = 0.4) => {
+        if (!showLines.checked) return;
+        const coords = turf.greatCircle([a.lon, a.lat], [b.lon, b.lat], { npoints: 100 })
+            .geometry.coordinates.map(c => [c[1], c[0]]);
+        const l = L.polyline(coords, { color, weight: 1.5, opacity, pane: 'shadowPane' }).addTo(map);
+        lines.push(l);
+        };
+
+      const green = L.icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+      });
+      const red = L.icon({
+        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+      });
+      markers.push(L.marker(current, { icon: green }).addTo(map).bindTooltip('Current Location'));
+      markers.push(L.marker(target, { icon: red }).addTo(map).bindTooltip('Target Location'));
+
+      closest.forEach((p, i) => {
+        drawLine({ lat: p.lat, lon: p.lon }, { lat: p.reflLat, lon: p.reflLon }, '#007bff');
+        addCircle(p.lat, p.lon, '#ff8800', `Original #${i+1} | ${p.lat}, ${p.lon}<br>Click to copy`);
+        addCircle(p.reflLat, p.reflLon, '#007bff', `Reflected #${i+1} | ${p.reflLat.toFixed(5)}, ${p.reflLon.toFixed(5)}<br>Click to copy`);
+      });
+
+      rest.forEach((p, i) => {
+        drawLine({ lat: p.lat, lon: p.lon }, { lat: p.reflLat, lon: p.reflLon }, '#999', 0.3);
+        addCircle(p.lat, p.lon, '#ff8800', `Rest Orig #${i+1} | ${p.lat}, ${p.lon}\nClick to copy`, 0.3);
+        addCircle(p.reflLat, p.reflLon, '#999', `Rest Refl #${i+1} | ${p.reflLat.toFixed(5)}, ${p.reflLon.toFixed(5)}<br>Click to copy`, 0.3);
+      });
+
+      map.setView(current, 6);
+    }
+  </script>
+</body>
+</html>
