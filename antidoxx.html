@@ -1,0 +1,694 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Antidoxx Tool (Client-side)</title>
+    <script src="https://unpkg.com/papaparse@5.3.2/papaparse.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+      if (!localStorage.getItem("seenWhyOverlay")) {
+        window.addEventListener("load", () => {
+          showWhyOverlay();
+        });
+      }
+    </script>
+    <link
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #1e1e1e;
+        --text: #eee;
+        --card: #2c2c2c;
+      }
+      body.light {
+        --bg: #f4f4f9;
+        --text: #333;
+        --card: #fff;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        font-family: "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        transition:
+          background 0.3s,
+          color 0.3s;
+      }
+      #container {
+        display: flex;
+        height: 100vh;
+        width: 100vw;
+      }
+      #sidebar {
+        width: 50%;
+        min-width: 30%;
+        max-width: 80%;
+        background: var(--bg);
+        padding: 1em;
+        box-sizing: border-box;
+        overflow-y: auto;
+        resize: horizontal;
+        overflow: auto;
+      }
+      #resizer {
+        width: 5px;
+        cursor: ew-resize;
+        background-color: #ccc;
+        position: relative;
+      }
+      #resizer::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 1px;
+        background-color: #888;
+        transform: translateX(-50%);
+      }
+      #map {
+        flex-grow: 1;
+        height: 100%;
+      }
+      h2 {
+        color: var(--text);
+        text-align: center;
+      }
+      input[type="number"],
+      textarea,
+      input[type="file"] {
+        width: 90%;
+        padding: 0.4em;
+        margin: 0.3em 0;
+        border-radius: 4px;
+        border: 1px solid #ccc;
+        background: var(--card);
+        color: var(--text);
+      }
+      table {
+        border-collapse: collapse;
+        margin: 10px auto;
+        background: var(--card);
+        width: 100%;
+        color: var(--text);
+      }
+      th,
+      td {
+        border: 1px solid #ccc;
+        padding: 4px 8px;
+      }
+      body.light th.keep {
+        background-color: #c8f7c5;
+        cursor: pointer;
+      }
+      th.keep {
+        background-color: #1f5f1f;
+      }
+      body.light th.drop {
+        background-color: #f7c5c5;
+        cursor: pointer;
+      }
+      th.drop {
+        background-color: #5f1f1f;
+      }
+      button {
+        margin: 0.5em;
+        padding: 0.5em 1em;
+        background-color: #1976d2;
+        border: none;
+        color: white;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background-color 0.3s;
+      }
+      button:hover {
+        background-color: #125a9c;
+      }
+      .blacklist-group {
+        display: flex;
+        gap: 1em;
+      }
+      .blacklist-column {
+        flex: 1;
+      }
+      label.checkbox {
+        display: block;
+        margin-top: 0.5em;
+      }
+      #darkToggle {
+        position: absolute;
+        bottom: 10px;
+        left: 60px;
+        background: #333;
+        color: #fff;
+        border: none;
+        border-radius: 20px;
+        width: 40px;
+        height: 40px;
+        cursor: pointer;
+        font-size: 1.2em;
+        transition:
+          background 0.3s,
+          transform 0.3s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+      }
+      #darkToggle:hover {
+        transform: rotate(45deg);
+      }
+      #resetButton {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        background: #333;
+        color: #fff;
+        border: none;
+        border-radius: 20px;
+        width: 40px;
+        height: 40px;
+        cursor: pointer;
+        font-size: 1.2em;
+        transition:
+          background 0.3s,
+          transform 0.3s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+      }
+      #resetButton:hover {
+        transform: rotate(-360deg);
+      }
+      #whyOverlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.7);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+      }
+      #whyContent {
+        background: var(--card);
+        color: var(--text);
+        padding: 2em;
+        max-width: 600px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px #000;
+      }
+      #whyContent h3 {
+        margin-top: 0;
+      }
+      #whyContent button {
+        margin-top: 1em;
+      }
+      .why-link {
+        font-size: 0.6em;
+        text-decoration: none;
+        color: #64b5f6;
+      }
+      .why-link:visited {
+        color: #64b5f6;
+      }
+      body.light .why-link {
+        color: #1976d2;
+      }
+      body.light .why-link:visited {
+        color: #1976d2;
+      }
+      .leaflet-tile {
+        filter: brightness(0.55);
+      }
+
+      body.light .leaflet-tile {
+        filter: brightness(1);
+      }
+
+      #coordDisplay {
+        position: absolute;
+        pointer-events: none;
+        background: rgba(0, 0, 0, 0.6);
+        color: white;
+        padding: 2px 6px;
+        font-size: 0.85em;
+        border-radius: 4px;
+        z-index: 1000;
+        transform: translate(10px, 10px);
+        white-space: pre-line;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container">
+      <div id="sidebar">
+        <h2>
+          (Team)TPG Antidoxx Tool
+          <a href="#" onclick="showWhyOverlay()" class="why-link"
+            >(how and why?)</a
+          >
+        </h2>
+        <input type="file" id="csvFile" accept=".csv" onchange="previewCSV()" />
+        <div id="previewTable"></div>
+
+        <div class="blacklist-group">
+          <div class="blacklist-column">
+            <label>Blacklist A (lat,lon):</label><br />
+            <textarea id="blacklistA" rows="4" oninput="drawRings()">
+0,0</textarea
+            ><br />
+            <label>Radius A (km):</label>
+            <input
+              type="number"
+              id="radiusA"
+              value="5"
+              step="any"
+              oninput="drawRings()"
+            /><br />
+            <label>Inner Radius A (km):</label>
+            <input
+              type="number"
+              id="innerRadiusA"
+              value="1"
+              step="any"
+              oninput="drawRings()"
+            /><br />
+          </div>
+          <div class="blacklist-column">
+            <label>Blacklist B (lat,lon):</label><br />
+            <textarea id="blacklistB" rows="4" oninput="drawRings()"></textarea
+            ><br />
+            <label>Radius B (km):</label>
+            <input
+              type="number"
+              id="radiusB"
+              value="10"
+              step="any"
+              oninput="drawRings()"
+            /><br />
+            <label>Inner Radius B (km):</label>
+            <input
+              type="number"
+              id="innerRadiusB"
+              value="2"
+              step="any"
+              oninput="drawRings()"
+            /><br />
+          </div>
+        </div>
+
+        <label class="checkbox"
+          ><input type="checkbox" id="dedupe" checked /> Deduplicate
+          coordinates</label
+        >
+
+        <button onclick="processCSV()">Run Antidoxx</button>
+        <button onclick="downloadCSV()">Download CSV</button>
+        <button onclick="plotCSVOnly()">Plot Only</button>
+      </div>
+      <div id="resizer"></div>
+      <div id="map"></div>
+    </div>
+    <button id="darkToggle" onclick="toggleDarkMode()">🌙</button>
+    <button id="resetButton" onclick="resetAll()">⭯</button>
+
+    <script>
+      function resetAll() {
+        if (!confirm("Reset all fields and map size to default?")) return;
+        document.getElementById("blacklistA").value = "0,0";
+        document.getElementById("radiusA").value = 5;
+        document.getElementById("innerRadiusA").value = 1;
+        document.getElementById("blacklistB").value = "";
+        document.getElementById("radiusB").value = 10;
+        document.getElementById("innerRadiusB").value = 2;
+        document.getElementById("dedupe").checked = true;
+        document.getElementById("sidebar").style.width = "50%";
+        localStorage.removeItem("sidebarWidth");
+        document.getElementById("csvFile").value = "";
+        document.getElementById("previewTable").innerHTML = "";
+        if (typeof ringLayers !== "undefined") {
+          ringLayers.forEach((l) => map.removeLayer(l));
+          ringLayers = [];
+        }
+        drawRings();
+      }
+
+      window.addEventListener("load", () => {
+        document.getElementById("csvFile").value = "";
+      });
+
+      if (localStorage.getItem("lightMode") === "true") {
+        document.body.classList.add("light");
+        document.addEventListener("DOMContentLoaded", () => {
+          const btn = document.getElementById("darkToggle");
+          if (btn) btn.textContent = "☀️";
+        });
+      }
+
+      const savedWidth = localStorage.getItem("sidebarWidth");
+      if (savedWidth) {
+        document.getElementById("sidebar").style.width = `${savedWidth}px`;
+      }
+
+      const resizer = document.getElementById("resizer");
+      const sidebar = document.getElementById("sidebar");
+      let isResizing = false;
+
+      resizer.addEventListener("mousedown", (e) => {
+        isResizing = true;
+        document.body.style.cursor = "ew-resize";
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!isResizing) return;
+        const newWidth = Math.min(
+          Math.max(e.clientX, window.innerWidth * 0.3),
+          window.innerWidth * 0.8,
+        );
+        sidebar.style.width = newWidth + "px";
+        localStorage.setItem("sidebarWidth", newWidth);
+      });
+
+      window.addEventListener("mouseup", () => {
+        if (isResizing) {
+          isResizing = false;
+          document.body.style.cursor = "";
+        }
+      });
+
+      function toggleDarkMode() {
+        const isLight = document.body.classList.toggle("light");
+        const btn = document.getElementById("darkToggle");
+        btn.textContent = isLight ? "🌙" : "☀️";
+        localStorage.setItem("lightMode", isLight ? "true" : "false");
+      }
+
+      let csvData = [],
+        columnCheckboxes = [],
+        map;
+      let savedCenter = [0, 0];
+      let savedZoom = 3;
+      let ringLayers = [];
+
+      function previewCSV() {
+        const file = document.getElementById("csvFile").files[0];
+        if (!file) return;
+        Papa.parse(file, {
+          complete: function (results) {
+            csvData = results.data.filter((row) => row.length > 1);
+            columnCheckboxes = csvData[0].map((_, i) => true);
+            renderTable(csvData);
+          },
+          header: false,
+        });
+      }
+
+      function renderTable(data) {
+        const preview = document.getElementById("previewTable");
+        const rows = data.slice(0, 10);
+        let html = "<table><thead><tr>";
+        rows[0].forEach((_, i) => {
+          const fixed = i === 0 || i === 1;
+          const cls = fixed || columnCheckboxes[i] ? "keep" : "drop";
+          html += `<th class="${cls}" onclick="toggleColumn(${i})">Col ${i}</th>`;
+        });
+        html += "</tr></thead><tbody>";
+        rows.forEach((row) => {
+          html +=
+            "<tr>" + row.map((cell) => `<td>${cell}</td>`).join("") + "</tr>";
+        });
+        html += "</tbody></table>";
+        preview.innerHTML = html;
+      }
+
+      function toggleColumn(index) {
+        if (index === 0 || index === 1) return;
+        columnCheckboxes[index] = !columnCheckboxes[index];
+        renderTable(csvData);
+      }
+
+      function haversine(lat1, lon1, lat2, lon2) {
+        const R = 6371;
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLon / 2) ** 2;
+        return R * 2 * Math.asin(Math.sqrt(a));
+      }
+
+      function processCSV() {
+        if (!csvData.length) return alert("No CSV loaded");
+        const blacklist = [
+          ...getBlacklistEntries("A"),
+          ...getBlacklistEntries("B"),
+        ];
+        const dedupe = document.getElementById("dedupe").checked;
+        const seen = new Set(),
+          kept = [],
+          removed = [];
+
+        csvData.forEach((row) => {
+          const lat = parseFloat(row[0]),
+            lon = parseFloat(row[1]);
+          const key = lat + "," + lon;
+          if ((dedupe && seen.has(key)) || isNaN(lat) || isNaN(lon)) return;
+          let shouldRemove = false;
+          for (const {
+            lat: blLat,
+            lon: blLon,
+            radius,
+            innerRadius,
+          } of blacklist) {
+            const dist = haversine(lat, lon, blLat, blLon);
+            if (
+              dist <= innerRadius ||
+              (dist <= radius &&
+                Math.random() <
+                  1 - (dist - innerRadius) / (radius - innerRadius))
+            ) {
+              shouldRemove = true;
+              break;
+            }
+          }
+          if (dedupe) seen.add(key);
+          const filtered = row.filter(
+            (_, i) => i === 0 || i === 1 || columnCheckboxes[i],
+          );
+          (shouldRemove ? removed : kept).push(filtered);
+        });
+
+        savedCenter = map.getCenter();
+        savedZoom = map.getZoom();
+
+        drawMap(kept, removed);
+        window.filteredKept = kept;
+      }
+
+      function getBlacklistEntries(suffix) {
+        const blText = document
+          .getElementById("blacklist" + suffix)
+          .value.trim();
+        const radius = parseFloat(
+          document.getElementById("radius" + suffix).value,
+        );
+        const innerRadius = parseFloat(
+          document.getElementById("innerRadius" + suffix).value,
+        );
+        return blText
+          .split(/\r?\n/)
+          .map((line) => line.split(",").map((v) => parseFloat(v.trim())))
+          .filter(([lat, lon]) => !isNaN(lat) && !isNaN(lon))
+          .map(([lat, lon]) => ({ lat, lon, radius, innerRadius }));
+      }
+
+      function drawMap(kept, removed) {
+        if (!map) {
+          map = L.map("map").setView(savedCenter, savedZoom);
+          L.tileLayer(
+            "https://cartodb-basemaps-c.global.ssl.fastly.net/light_all/{z}/{x}/{y}@2x.png",
+            {
+              attribution: "&copy; OpenStreetMap contributors",
+            },
+          ).addTo(map);
+        } else {
+          map.eachLayer((layer) => {
+            if (layer instanceof L.CircleMarker) map.removeLayer(layer);
+          });
+        }
+
+        kept.forEach(([lat, lon]) => {
+          L.circleMarker([lat, lon], { radius: 4, color: "green" }).addTo(map);
+        });
+        removed.forEach(([lat, lon]) => {
+          L.circleMarker([lat, lon], {
+            radius: 4,
+            color: "cornflowerblue",
+          }).addTo(map);
+        });
+
+        drawRings();
+      }
+
+      function plotCSVOnly() {
+        if (!csvData.length) return alert("No CSV loaded");
+        savedCenter = map.getCenter();
+        savedZoom = map.getZoom();
+        drawMap(
+          csvData.filter(
+            (row) => !isNaN(parseFloat(row[0])) && !isNaN(parseFloat(row[1])),
+          ),
+          [],
+        );
+      }
+
+      function drawRings() {
+        const blacklist = [
+          ...getBlacklistEntries("A"),
+          ...getBlacklistEntries("B"),
+        ];
+        ringLayers.forEach((l) => map.removeLayer(l));
+        ringLayers = [];
+
+        blacklist.forEach(({ lat, lon, radius, innerRadius }) => {
+          const outer = L.circle([lat, lon], {
+            radius: radius * 1000,
+            color: "orange",
+            fillOpacity: 0,
+            weight: 5,
+          }).addTo(map);
+          ringLayers.push(outer);
+          if (innerRadius > 0) {
+            const inner = L.circle([lat, lon], {
+              radius: innerRadius * 1000,
+              color: "red",
+              fillOpacity: 0,
+              weight: 5,
+            }).addTo(map);
+            ringLayers.push(inner);
+          }
+        });
+      }
+
+      function downloadCSV() {
+        if (!window.filteredKept || !window.filteredKept.length)
+          return alert("Nothing to download.");
+        const csv = Papa.unparse(window.filteredKept);
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "filtered.csv";
+        link.click();
+      }
+
+      window.onload = () => {
+        map = L.map("map").setView(savedCenter, savedZoom);
+        L.tileLayer(
+          "https://cartodb-basemaps-c.global.ssl.fastly.net/light_all/{z}/{x}/{y}@2x.png",
+          {
+            attribution: "&copy; OpenStreetMap contributors",
+          },
+        ).addTo(map);
+        drawRings();
+
+        const coordDisplay = document.getElementById("coordDisplay");
+        map.on("mousemove", function (e) {
+          const { lat, lng } = e.latlng;
+          coordDisplay.textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}\n\rClick to copy`;
+          coordDisplay.style.left = e.originalEvent.pageX + "px";
+          coordDisplay.style.top = e.originalEvent.pageY + "px";
+          coordDisplay.style.display = "block";
+        });
+        map.on("mouseout", function () {
+          coordDisplay.style.display = "none";
+        });
+        map.on("click", function (e) {
+          const { lat, lng } = e.latlng;
+          const coordText = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+          navigator.clipboard.writeText(coordText).then(() => {
+            coordDisplay.textContent = `Copied: ${coordText}`;
+            setTimeout(() => {
+              coordDisplay.style.display = "none";
+            }, 1000);
+          });
+        });
+      };
+    </script>
+    <div id="whyOverlay">
+      <div id="whyContent">
+        <h3>What is this tool and how do I use it?</h3>
+        <p>
+          When playing TeamTPG or when you just want to share a CSV of your
+          images with someone, it is very easy to doxx yourself. That’s why I
+          made this tool. It strips sensitive locations out of the CSV.
+        </p>
+        <h4>How it works:</h4>
+        <ul>
+          <li>
+            Upload a CSV with image coordinates and optionally any number of
+            additional columns.
+          </li>
+          <li>
+            Define one or two sets of <strong>blacklist coordinates</strong> –
+            places you want to hide.
+          </li>
+          <li>
+            Each blacklist point has an <strong>inner radius</strong> (100%
+            removal zone) and an <strong>outer radius</strong> (fades to 0%
+            chance of removal).
+          </li>
+          <li>
+            Optionally, you can click on the header of a column in the table to
+            toggle whether that column should be kept or removed.
+          </li>
+          <li>
+            Everything runs entirely in your browser — your data never leaves
+            your computer. In fact, if you don’t need to load additional map
+            tiles, you can turn off your internet connection after loading the
+            page.
+          </li>
+        </ul>
+        <h4>Map colors:</h4>
+        <ul>
+          <li>
+            <span style="color: red">Red ring</span>: Inner radius — all points
+            within this circle are removed.
+          </li>
+          <li>
+            <span style="color: orange">Orange ring</span>: Outer radius —
+            points between the red circle and this circle are removed with
+            decreasing probability the farther they are from the center.
+          </li>
+          <li><span style="color: green">Green dots</span>: Kept points.</li>
+          <li>
+            <span style="color: cornflowerblue">Blue dots</span>: Removed
+            points.
+          </li>
+        </ul>
+        <button onclick="hideWhyOverlay()">Close</button>
+      </div>
+    </div>
+    <script>
+      function showWhyOverlay() {
+        document.getElementById("whyOverlay").style.display = "flex";
+        localStorage.setItem("seenWhyOverlay", "true");
+      }
+      function hideWhyOverlay() {
+        document.getElementById("whyOverlay").style.display = "none";
+      }
+    </script>
+    <div id="coordDisplay" style="display: none"></div>
+  </body>
+</html>
